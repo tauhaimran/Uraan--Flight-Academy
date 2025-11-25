@@ -17,6 +17,43 @@
 ArtifactDB 
 ############
 
+#because I hate errors
+/Uraan - Flight Academy/Assets/Models
+/Uraan - Flight Academy/Assets/Samples
+/Uraan - Flight Academy/Assets/Textures
+/Uraan - Flight Academy/Assets/Settings
+
+#
+#
+#
+#
+
+
+############
+# DOING THIS SO GITHUB CAN STFU - ruining our coll ahh project with stupid errors - ugh
+# Prevent heavy assets from being committed
+*.dylib
+*.fbx
+*.obj
+*.blend
+*.gltf
+*.glb
+*.max
+*.usdz
+*.stl
+*.dae
+*.3ds
+*.ply
+*.zip
+*.rar
+*.so
+*.dbg.so
+*.aar
+
+#temporarily ignoring this folder
+############
+# you never read the first line anyways , ya got that ... lol
+
 
 # for personal reasons I want to ignore this folder
 docs/contracts/
@@ -27,13 +64,23 @@ docs/contracts/
 #
 .utmp/
 /[Ll]ibrary/
-/[Tt]emp/
-/[Oo]bj/
-/[Bb]uild/
-/[Bb]uilds/
-/[Ll]ogs/
-/[Uu]ser[Ss]ettings/
+*/[Tt]emp/
+*/[Oo]bj/
+*/[Bb]uild/
+*/[Bb]uilds/
+*/[Ll]ogs/
+*/[Uu]ser[Ss]ettings/
 *.log
+
+
+Temp/
+Library/
+obj/
+Logs/
+Build/
+UserSettings/
+
+
 
 # MemoryCaptures can get excessive in size.
 # They also could contain extremely sensitive data
