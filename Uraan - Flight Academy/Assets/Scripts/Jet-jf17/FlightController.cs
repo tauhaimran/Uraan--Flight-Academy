@@ -1,68 +1,90 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 
 [RequireComponent(typeof(Rigidbody))]
 public class FlightController : MonoBehaviour
 {
+    [Header("References")]
     public Rigidbody rb;
-    public EngineSystem engine;
-    public InputBridge input;
+    public Transform leverTransform;
+    public LeverGrabState grabState;
+    public CanopyController canopyController;  // reference to canopy
+    public AudioSource engineStartSFX;         // engine start SFX
 
-    [Header("Aerodynamics")]
-    public float liftCoefficient = 1.5f;   // realistic lift factor
-    public float dragCoefficient = 0.02f;  // base drag
-    public float pitchPower = 1500f;
-    public float rollPower  = 1000f;
-    public float yawPower   = 500f;
+    [Header("Lever Settings")]
+    public float xNeutral = 90f;
 
-    [Header("Debug / Tuning")]
-    public bool debugOutput = false;
+    [Header("Thrust Settings")]
+    public float throttleForce = 120000f;
+    public float decelForce = 60000f;
+
+    [Header("Lift Settings")]
+    public float liftForce = 50000f;
+    public float liftStartSpeed = 10f;
+
+    private bool engineStarted = false;
 
     void Start()
     {
-        if (rb == null) rb = GetComponent<Rigidbody>();
-        rb.mass = 9500f;          // realistic jet mass
+        if (rb == null)
+            rb = GetComponent<Rigidbody>();
+
+        rb.mass = 9500f;
         rb.drag = 0.05f;
-        rb.angularDrag = 0.15f;
+        rb.angularDrag = 0.1f;
+        rb.useGravity = true;
+
+
+        canopyController.CloseCanopy();
     }
 
     void FixedUpdate()
     {
-        if (input == null || engine == null) return;
+        // Wait for canopy to close before allowing throttle
+        if (!engineStarted)
+        {
+            if (canopyController != null && canopyController.IsClosed)
+            {
+                engineStarted = true;
+                if (engineStartSFX != null)
+                    engineStartSFX.Play();
+            }
+            else
+            {
+                return; // plane stays idle
+            }
+        }
 
-        // --- INPUTS ---
-        float throttle = Mathf.Clamp01(input.GetThrottle());
-        float pitch    = Mathf.Clamp(input.GetPitch(), -1f, 1f);
-        float roll     = Mathf.Clamp(input.GetRoll(), -1f, 1f);
-        float yaw      = Mathf.Clamp(input.GetYaw(), -1f, 1f);
+        // ------------------------- Plane logic -------------------------
+        float xRot = leverTransform.localEulerAngles.x;
+        if (xRot > 180f) xRot -= 360f;
 
-        // --- ENGINE THRUST ---
-        engine.SetThrottle(throttle);
-        Vector3 thrustForce = transform.forward * engine.GetThrust();
-        rb.AddForce(thrustForce, ForceMode.Force);
+        bool grabbed = (grabState != null && grabState.IsGrabbed);
 
-        // --- SPEED / DYNAMIC PRESSURE ---
+        // Throttle / Brake
+        if (grabbed)
+        {
+            if (xRot < xNeutral)
+            {
+                rb.AddForce(transform.forward * throttleForce, ForceMode.Force);
+            }
+            else if (xRot > xNeutral)
+            {
+                rb.AddForce(-transform.forward * decelForce, ForceMode.Force);
+            }
+        }
+        else
+        {
+            // Auto-return lever
+            float smoothX = Mathf.Lerp(xRot, xNeutral, Time.fixedDeltaTime * 5f);
+            leverTransform.localEulerAngles = new Vector3(smoothX, 0f, 0f);
+        }
+
+        // Lift
         float speed = rb.velocity.magnitude;
-        Vector3 forwardVel = Vector3.Project(rb.velocity, transform.forward);
-        
-        // --- LIFT (basic lift = q * S * CL) ---
-        float AoA = Vector3.SignedAngle(rb.velocity, transform.forward, transform.right) * Mathf.Deg2Rad;
-        float liftMag = 0.5f * 1.225f * speed * speed * liftCoefficient;  // rho = 1.225 kg/m³
-        rb.AddForce(transform.up * liftMag);
-
-        // --- DRAG ---
-        float dragMag = 0.5f * 1.225f * speed * speed * dragCoefficient;
-        rb.AddForce(-rb.velocity.normalized * dragMag);
-
-        // --- CONTROL SURFACES ---
-        rb.AddRelativeTorque(
-            new Vector3(-pitch * pitchPower, yaw * yawPower, -roll * rollPower),
-            ForceMode.Force
-        );
-
-        // --- DEBUG ---
-        if (debugOutput)
-            Debug.Log($"Throttle: {throttle:F2}  Speed: {speed:F1}  Lift: {liftMag:F0}  Thrust: {thrustForce.magnitude:F0}");
+        if (speed > liftStartSpeed)
+        {
+            rb.AddForce(Vector3.up * liftForce, ForceMode.Force);
+            rb.AddRelativeTorque(new Vector3(-40f * Time.fixedDeltaTime, 0f, 0f), ForceMode.Force);
+        }
     }
 }

@@ -1,7 +1,159 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 
+[RequireComponent(typeof(Rigidbody))]
+public class DemoFlight : MonoBehaviour
+{
+    [Header("References")]
+    public Rigidbody rb;
+    public CanopyController canopyController;
+    public AudioSource engineStartSFX;
+    public Transform startPoint;
+    public Transform runwayTarget; // exact landing point
+
+    [Header("Takeoff Settings")]
+    public float forwardThrust = 120000f;    // starting forward thrust
+    public float thrustRamp = 500f;
+    public float liftForce = 50000f;
+    public float liftRamp = 200f;
+    public float liftStartSpeed = 10f;
+    public float takeoffAltitude = 10f;
+
+    [Header("Flight Settings")]
+    public float turnAngle = 90f;
+    public float turnSpeed = 20f;           // yaw speed
+    public float bankAngle = 30f;           // roll during turn
+    public float returnAltitude = 30f;      
+    public float returnDistanceThreshold = 2f;
+
+    private enum FlightState { WaitingForCanopy, EngineStart, Takeoff, Turn, Return, Landed }
+    private FlightState state = FlightState.WaitingForCanopy;
+
+    private Quaternion targetYaw;
+    private Vector3 returnTarget;
+    private float groundY;
+
+    void Start()
+    {
+        if (rb == null) rb = GetComponent<Rigidbody>();
+
+        rb.mass = 9500f;
+        rb.drag = 0.05f;
+        rb.angularDrag = 0.1f;
+        rb.useGravity = true;
+        rb.isKinematic = false;
+
+        if (startPoint == null)
+            startPoint = new GameObject("StartPoint").transform;
+
+        startPoint.position = transform.position;
+        startPoint.rotation = transform.rotation;
+        transform.position = startPoint.position;
+
+        returnTarget = runwayTarget != null ? runwayTarget.position : startPoint.position;
+        groundY = runwayTarget != null ? runwayTarget.position.y : startPoint.position.y;
+
+        // Start closing canopy
+        if (canopyController != null)
+            canopyController.CloseCanopy();
+    }
+
+    void FixedUpdate()
+    {
+        float speed = rb.velocity.magnitude;
+        float altitude = transform.position.y - groundY; // relative to runway
+
+        switch (state)
+        {
+            case FlightState.WaitingForCanopy:
+                if (canopyController != null && canopyController.IsClosed)
+                    state = FlightState.EngineStart;
+                break;
+
+            case FlightState.EngineStart:
+                if (engineStartSFX != null && !engineStartSFX.isPlaying)
+                    engineStartSFX.Play();
+                state = FlightState.Takeoff;
+                break;
+
+            case FlightState.Takeoff:
+                // Forward thrust
+                rb.AddForce(transform.forward * forwardThrust, ForceMode.Force);
+                forwardThrust += thrustRamp;
+
+                // Lift only when moving fast enough
+                if (speed > liftStartSpeed)
+                {
+                    rb.AddForce(Vector3.up * liftForce, ForceMode.Force);
+                    liftForce += liftRamp;
+                    rb.AddRelativeTorque(new Vector3(-0.05f * 800f, 0f, 0f), ForceMode.Force); // nose up
+                }
+
+                // Start turn after reaching takeoff altitude
+                if (altitude >= takeoffAltitude)
+                {
+                    state = FlightState.Turn;
+                    targetYaw = Quaternion.Euler(0f, transform.eulerAngles.y + 180f, 0f); // 180° turnaround
+                    Debug.Log("Takeoff complete: starting 180° turn");
+                }
+
+                break;
+
+                case FlightState.Turn:
+                    rb.AddForce(transform.forward * forwardThrust, ForceMode.Force);
+
+                    // Bank the plane
+                    Vector3 localEuler = transform.localEulerAngles;
+                    float desiredRoll = Mathf.LerpAngle(localEuler.z, -bankAngle, Time.fixedDeltaTime * 2f);
+                    transform.localEulerAngles = new Vector3(localEuler.x, localEuler.y, desiredRoll);
+
+                    // Smooth yaw rotation
+                    transform.rotation = Quaternion.RotateTowards(transform.rotation, targetYaw, turnSpeed * Time.fixedDeltaTime);
+
+                    // Keep altitude
+                    float liftDuringTurn = liftForce + Mathf.Clamp((returnAltitude - altitude) * 500f, -liftForce, liftForce*2f);
+                    rb.AddForce(Vector3.up * liftDuringTurn, ForceMode.Force);
+
+                    // After completing 180° turn, start return
+                    if (Quaternion.Angle(transform.rotation, targetYaw) < 1f)
+                        state = FlightState.Return;
+                    break;
+
+
+            case FlightState.Return:
+                rb.AddForce(transform.forward * forwardThrust, ForceMode.Force);
+
+                // Maintain altitude
+                float altitudeError = returnAltitude - altitude;
+                float liftCorrection = liftForce + Mathf.Clamp(altitudeError * 500f, -liftForce, liftForce*2f);
+                rb.AddForce(Vector3.up * liftCorrection, ForceMode.Force);
+
+                // Rotate toward runway
+                Vector3 dirToStart = (returnTarget - transform.position).normalized;
+                Quaternion lookRot = Quaternion.LookRotation(dirToStart);
+                transform.rotation = Quaternion.RotateTowards(transform.rotation, lookRot, turnSpeed * Time.fixedDeltaTime);
+
+                // Gentle roll leveling
+                Vector3 euler = transform.localEulerAngles;
+                transform.localEulerAngles = new Vector3(euler.x, euler.y, Mathf.LerpAngle(euler.z, 0f, Time.fixedDeltaTime * 2f));
+
+                if (Vector3.Distance(transform.position, returnTarget) < returnDistanceThreshold)
+                {
+                    state = FlightState.Landed;
+                    rb.velocity = Vector3.zero;
+                }
+                break;
+
+            case FlightState.Landed:
+                break;
+        }
+
+        Debug.Log($"State: {state}, Speed: {speed:F1}, Altitude: {altitude:F1}");
+    }
+}
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
+/*
 [RequireComponent(typeof(Rigidbody))]
 public class FlightTester : MonoBehaviour
 {
@@ -28,7 +180,7 @@ public class FlightTester : MonoBehaviour
 
         // --- Always push forward ---
         rb.AddForce(transform.forward * forwardThrust, ForceMode.Force);
-        //rb.AddForce(transform.forward * forwardThrust, ForceMode.Acceleration); //rocket launch lmaa
+        //rb.AddForce(transform.forward * forwardThrust, ForceMode.Acceleration); //rocket launch lmao
         //rb.AddForce(transform.forward * (forwardThrust * 0.3f), ForceMode.Acceleration);
         forwardThrust += 500f; // gradually increase thrust over time
 
@@ -47,4 +199,4 @@ public class FlightTester : MonoBehaviour
         // --- Debug ---
         Debug.Log($"Speed: {speed:F1} m/s  Vertical velocity: {rb.velocity.y:F1}");
     }
-}
+}*/
