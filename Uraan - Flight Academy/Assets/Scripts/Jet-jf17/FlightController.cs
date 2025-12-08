@@ -1,90 +1,111 @@
 using UnityEngine;
 
-[RequireComponent(typeof(Rigidbody))]
 public class FlightController : MonoBehaviour
 {
     [Header("References")]
-    public Rigidbody rb;
-    public Transform leverTransform;
-    public LeverGrabState grabState;
-    public CanopyController canopyController;  // reference to canopy
-    public AudioSource engineStartSFX;         // engine start SFX
+    public Rigidbody rb; // only for collisions if needed
+    public Transform throttleLever;
+    public LeverGrabState leverGrabState;
+    public ConfigurableJoystickGrab joystick;
+    public CanopyController canopyController;
+    public AudioSource engineStartSFX;
 
-    [Header("Lever Settings")]
-    public float xNeutral = 90f;
-
-    [Header("Thrust Settings")]
-    public float throttleForce = 120000f;
-    public float decelForce = 60000f;
-
-    [Header("Lift Settings")]
-    public float liftForce = 50000f;
-    public float liftStartSpeed = 10f;
+    [Header("Fake Flight Settings")]
+    public float maxSpeed = 40f;          // top speed
+    public float rotationSpeed = 40f;     // how quickly plane rotates
+    public float rotationSmooth = 4f;     // smoothing
+    public float throttleSmooth = 2f;     // smoothing for throttle
 
     private bool engineStarted = false;
+    private float currentSpeed = 0f;      // smoothed speed
+    private float throttleValue = 0f;     // 0–1 based on lever
 
     void Start()
     {
-        if (rb == null)
-            rb = GetComponent<Rigidbody>();
+        if (rb == null) rb = GetComponent<Rigidbody>();
 
-        rb.mass = 9500f;
-        rb.drag = 0.05f;
-        rb.angularDrag = 0.1f;
-        rb.useGravity = true;
+        // Rigidbody no longer controls flight — only collisions
+        rb.useGravity = false;
+        rb.isKinematic = false; // allow collisions but no forces
 
-
-        canopyController.CloseCanopy();
+        // close canopy on start
+        if (canopyController != null)
+            canopyController.CloseCanopy();
     }
 
-    void FixedUpdate()
+    void Update()
     {
-        // Wait for canopy to close before allowing throttle
+        // --- ENGINE WAITING ---
         if (!engineStarted)
         {
             if (canopyController != null && canopyController.IsClosed)
             {
                 engineStarted = true;
-                if (engineStartSFX != null)
-                    engineStartSFX.Play();
+                if (engineStartSFX != null) engineStartSFX.Play();
             }
             else
             {
-                return; // plane stays idle
+                return;
             }
         }
 
-        // ------------------------- Plane logic -------------------------
-        float xRot = leverTransform.localEulerAngles.x;
-        if (xRot > 180f) xRot -= 360f;
+        // --- READ THROTTLE LEVER ANGLE ---
+        float leverX = throttleLever.localEulerAngles.x;
+        if (leverX > 180f) leverX -= 360f;
 
-        bool grabbed = (grabState != null && grabState.IsGrabbed);
+        bool grabbed = leverGrabState != null && leverGrabState.IsGrabbed;
 
-        // Throttle / Brake
         if (grabbed)
         {
-            if (xRot < xNeutral)
-            {
-                rb.AddForce(transform.forward * throttleForce, ForceMode.Force);
-            }
-            else if (xRot > xNeutral)
-            {
-                rb.AddForce(-transform.forward * decelForce, ForceMode.Force);
-            }
+            // Map lever angle → throttle 0–1
+            // 0 deg = full throttle, 180 deg = full brake
+            throttleValue = Mathf.InverseLerp(180f, 0f, leverX);
         }
         else
         {
-            // Auto-return lever
-            float smoothX = Mathf.Lerp(xRot, xNeutral, Time.fixedDeltaTime * 5f);
-            leverTransform.localEulerAngles = new Vector3(smoothX, 0f, 0f);
+            // auto return to middle (cruise)
+            float smoothX = Mathf.Lerp(leverX, 90f, Time.deltaTime * 5f);
+            throttleLever.localEulerAngles = new Vector3(smoothX, 0f, 0f);
+
+            throttleValue = 0.5f; // cruising speed when released
         }
 
-        // Lift
-        float speed = rb.velocity.magnitude;
-        if (speed > liftStartSpeed)
+        // Smooth the actual current speed
+        float targetSpeed = throttleValue * maxSpeed;
+        currentSpeed = Mathf.Lerp(currentSpeed, targetSpeed, Time.deltaTime * throttleSmooth);
+
+
+        // --- FORWARD MOVEMENT ---
+        transform.position += transform.forward * currentSpeed * Time.deltaTime;
+
+
+        // --- JOYSTICK ROTATION ---
+        float pitch = 0f;
+        float roll = 0f;
+        float yaw = 0f;
+
+        if (joystick != null && joystick.IsGrabbed)
         {
-            rb.AddForce(Vector3.up * liftForce, ForceMode.Force);
-            rb.AddRelativeTorque(new Vector3(-40f * Time.fixedDeltaTime, 0f, 0f), ForceMode.Force);
+            pitch = joystick.AxisY;       // -1 → 1
+            roll  = -joystick.AxisX;      // inverted feels better
         }
+
+        // Turn slowly automatically with roll
+        yaw = roll * 0.5f;
+
+        // Build target rotation
+        Vector3 targetAngles = new Vector3(
+            pitch * rotationSpeed,
+            yaw * rotationSpeed,
+            roll * rotationSpeed
+        );
+
+        Quaternion deltaRot = Quaternion.Euler(targetAngles * Time.deltaTime);
+
+        transform.rotation = Quaternion.Slerp(
+            transform.rotation,
+            transform.rotation * deltaRot,
+            Time.deltaTime * rotationSmooth
+        );
     }
 }

@@ -1,4 +1,4 @@
-using UnityEngine;
+/*using UnityEngine;
 
 [RequireComponent(typeof(Rigidbody))]
 public class DemoFlight : MonoBehaviour
@@ -149,7 +149,7 @@ public class DemoFlight : MonoBehaviour
 
         Debug.Log($"State: {state}, Speed: {speed:F1}, Altitude: {altitude:F1}");
     }
-}
+}*/
 
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
